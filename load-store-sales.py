@@ -9,7 +9,8 @@ import os
 import socket
 import re
 import urllib
-
+import json
+from psutil import virtual_memory
 from math import ceil
 from subprocess import call
 
@@ -19,15 +20,27 @@ LOAD_FILE = "load_store_sales_tmp.sql"
 
 def get_mem_limit():
   """Get the memory limit of an Impala daemon"""
-  content = urllib.urlopen("http://{0}:25000/varz?raw".format(IMPALAD)).read()
+  content = urllib.urlopen("http://{0}:25000/varz?json".format(IMPALAD)).read()
   # memz has the mem limit in bytes
-  mem_limit_gb = float(re.findall('--mem_limit=(\d+)', content)[0])/(1024**3)
+  j = json.loads(content, encoding="utf-8")
+  current = 0
+  flags = j.get("flags",[])
+  for item in flags:
+     if item.get("name") == "mem_limit":
+       current=item.get("current","")
+       break
+  if current=="-1":
+    mem=virtual_memory()
+    current=mem.total*0.8
+  mem_limit_gb = float(long(current)/(1024**3))
   return mem_limit_gb
 
 def get_num_backends():
   """Get the number of Impala daemons in the cluster"""
-  content = urllib.urlopen("http://{0}:25000/backends?raw".format(IMPALAD)).read()
-  return len([b for b in content.strip().split('\n') if '22000' in b])
+  content = urllib.urlopen("http://{0}:25000/backends?json".format(IMPALAD)).read()
+  j = json.loads(content,encoding="utf-8")
+  l = len(j.get("backends",[]))
+  return l
 
 def generate_queries(ss_sold_dates):
   num_part_per_query = int(ceil(0.5 * get_mem_limit())) * get_num_backends()
